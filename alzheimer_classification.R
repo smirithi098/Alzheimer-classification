@@ -72,3 +72,34 @@ asf_mean_sd <- calculate_mean_sd(raw_data$ASF)
 raw_data$eTIV <- (raw_data$eTIV - eTIV_mean_sd$mean_col)/ eTIV_mean_sd$sd_col
 raw_data$nWBV <- (raw_data$nWBV - nWBV_mean_sd$mean_col)/ nWBV_mean_sd$sd_col
 raw_data$ASF <- (raw_data$ASF - asf_mean_sd$mean_col)/ asf_mean_sd$sd_col
+
+clean_data <- raw_data
+
+#------------------------DESCRIPTIVE ANALYSIS-----------------------------------
+
+# get the summary of the data fields
+summary(clean_data)
+
+# distribution of age of all patients
+clean_data %>%
+  ggplot(aes(x=Age)) +
+  geom_histogram(aes(y=..density..), color="coral3", fill="coral3") +
+  geom_density(alpha=0.3, fill="bisque") +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(colour = "black")
+  ) +
+  labs(title = "Distribution of age of patients",
+       x = "Age", y = "Number of patients")
+
+
+# distribution of demented and non demented patients for each gender
+
+
+
+
+
+
+
