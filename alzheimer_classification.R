@@ -1,13 +1,15 @@
-setwd("S:/MA335_Modelling and observational data in R/Final project")
+setwd("S:/MA335_Modelling and observational data in R/Final project/Alzheimer-classification")
 
 library(dplyr)
 library(ggplot2)
 library(superml)
 library(tidyr)
 library(plotly)
-library(ggExtra)
+library(corrplot)
+library(RColorBrewer)
+library(fclust)
 
-# read the csv file as dataframe
+# read the csv file as data frame
 raw_data <- read.csv("project data.csv", header = TRUE)
 
 #---------------------------DATA CLEANING---------------------------------------
@@ -142,19 +144,118 @@ ggplotly(clean_data %>%
 
 # correlation matrix
 
-corr_plot <- clean_data %>%
-  ggplot(aes(x=Age, y=nWBV, color=Gender)) +
-  geom_point() +
-  geom_smooth(method = lm, se = FALSE) +
-  scale_color_manual(values = c("deepskyblue3", "hotpink3"), 
-                     labels = c("Male", "Female")) +
-  theme(
-    panel.background = element_blank(),
-    axis.line = element_line(colour = "black"),
-    legend.position = "none"
-  ) +
-  labs(title = "Correlation - Age vs whole brain volume",
-       x = "Age", y = "Whole Brain Volume")
+corrplot(
+  cor(clean_data[, -c(1,2,7)]),
+  type="upper",
+  order = "hclust",
+  col = brewer.pal(n=6, "PuOr"),
+  bg = "mintcream",
+  tl.col = "black",
+  diag = FALSE,
+  addCoef.col = "black"
+)
 
-ggMarginal(corr_plot, type = "histogram", 
-           fill = "slategrey")
+# scatter plot between Age and nWBV for each gender group
+
+ggplotly(clean_data %>%
+           ggplot(aes(x=Age, y=nWBV, color=Gender)) +
+           geom_point() +
+           geom_smooth(method = lm, se = FALSE) +
+           scale_color_manual(values = c("deepskyblue3", "hotpink3"), 
+                              labels = c("Male", "Female")) +
+           scale_x_continuous(breaks = unique(clean_data$Age)) +
+           theme(
+             panel.background = element_blank(),
+             axis.line = element_line(colour = "black"),
+             legend.position = "none"
+           ) +
+           labs(title = "Correlation - Age vs whole brain volume",
+                x = "Age", y = "Whole Brain Volume")
+)
+
+#----------------------------CLUSTERING ALGORITHM-------------------------------
+
+# maximum clusters we want to form
+max_number_of_clusters <- 5
+
+# vector to store the values of index returned by the method for each k value
+index_values <- numeric(max_number_of_clusters - 1)
+
+# function to calculate the index for each k value and choose the optimal k
+get_optimal_cluster <- function(data, max_clust) {
+  
+  # iterate over k values from 2 to max value
+  for (k in 2:max_clust) {
+    print(k)
+    # perform fuzzy clustering
+    cluster_result <- Fclust(data.matrix(data), k)
+    # get the index value for the used k value
+    index_values[k-1] <- Fclust.index(cluster_result)
+  }
+  
+  # create a dataframe containing clusters and index values
+  index_data <- data.frame(clusters = 2:max_clust, indices = index_values)
+  
+  # select the k value with maximum index
+  optimal_index <- which.max(index_values) + 1
+  
+  # return the data frame and chosen optimal k
+  return(list(optimal_value = optimal_index, index_df = index_data))
+  
+}
+
+
+# get the output returned by function
+result <- get_optimal_cluster(clean_data, max_number_of_clusters)
+
+# optimal k value returned by function
+optimal_k <- result$optimal_value
+
+# data frame returned by function with k and index values
+cluster_index_df <- result$index_df
+
+# plot the clusters and corresponding indices
+ggplotly(ggplot(cluster_index_df, aes(x = clusters, y = indices)) +
+  geom_line(linewidth = 0.5) +
+  geom_point(color = "red") + 
+  labs(title = "Index values for the correspoding K value",
+       x = "Number of clusters (k)",
+       y = "Index values") +
+  theme_classic()
+)
+
+cat("Optimal value of k: ", optimal_k)
+
+# Perform fuzzy k-means clustering
+
+clustering_FKM <-  function(data, k_clusters){
+  fkm_output <- FKM(data.matrix(data),
+                    k =k_clusters,
+                    stand = 1
+                    )
+  
+  return(fkm_output)
+}
+
+fuzzy_k_means_result <- clustering_FKM(clean_data, optimal_k)
+
+# print the summary of the clustering algorithm
+summary.fclust(fuzzy_k_means_result)
+
+# plot the clusters
+plot(fuzzy_k_means_result,
+     colclus = c("dodgerblue3", "palevioletred3"),
+     pca = TRUE)
+
+
+
+
+
+
+
+
+
+
+
+
+
