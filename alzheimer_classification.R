@@ -10,6 +10,8 @@ library(RColorBrewer)
 library(fclust)
 library(tidymodels)
 library(glmnet)
+library(caret)
+
 
 # read the csv file as data frame
 raw_data <- read.csv("project data.csv", header = TRUE)
@@ -143,19 +145,6 @@ ggplotly(clean_data %>%
   labs(title = "Average total intracranial volume for all age groups",
        x = "Age", y = "Average Total Intracranial Volume")
   )
-
-# correlation matrix
-
-corrplot(
-  cor(clean_data[, -c(1,2,7)]),
-  type="upper",
-  order = "hclust",
-  col = brewer.pal(n=6, "PuOr"),
-  bg = "mintcream",
-  tl.col = "black",
-  diag = FALSE,
-  addCoef.col = "black"
-)
 
 # scatter plot between Age and nWBV for each gender group
 
@@ -310,7 +299,7 @@ chosen_params <- select_best(tune_logis_reg, metric = "accuracy")
 # fit the model with the chosen parameter values
 final_model <- logistic_reg(
   mixture = chosen_params$mixture,
-  penalty = chosen_params$mixture) %>%
+  penalty = chosen_params$penalty) %>%
   set_engine("glmnet") %>%
   set_mode("classification") %>%
   fit(Group ~ ., data = train_data)
@@ -349,3 +338,36 @@ predictors_significance %>%
        y = "Siginificance level") +
   theme_classic() +
   coord_flip()
+
+#------------------------------FEATURE SELECTION--------------------------------
+
+# correlation matrix
+
+corrplot(
+  cor(cor(data.matrix(clean_data[, -c(1, 2, 4)]))),
+  type="upper",
+  order = "hclust",
+  col = brewer.pal(n=6, "PuOr"),
+  bg = "mintcream",
+  tl.col = "black",
+  diag = FALSE,
+  addCoef.col = "black"
+)
+
+# find the redundant variables and remove them from the data
+findCorrelation(cor(data.matrix(clean_data[, -c(1, 2, 4)])), cutoff = 0.75)
+
+# Remove `eTIV` from the data
+clean_data <- clean_data[,-8]
+
+# calculate the importance value for each feature
+fs <- filterVarImp(x = clean_data[, c(2:9)],
+                            y = clean_data$Group)
+
+# bind the features and corresponding score in a data frame
+fs <-  data.frame(cbind(feature = rownames(fs), score = as.double(fs[,1])))
+
+fs[order(fs$score, decreasing = T),]
+
+# selecting the top 3 features as new predictors
+new_data <- clean_data[, c("Group", "MMSE", "nWBV", "CDR")]
