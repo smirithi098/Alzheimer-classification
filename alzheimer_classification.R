@@ -8,6 +8,8 @@ library(plotly)
 library(corrplot)
 library(RColorBrewer)
 library(fclust)
+library(tidymodels)
+library(glmnet)
 
 # read the csv file as data frame
 raw_data <- read.csv("project data.csv", header = TRUE)
@@ -247,15 +249,103 @@ plot(fuzzy_k_means_result,
      colclus = c("dodgerblue3", "palevioletred3"),
      pca = TRUE)
 
+#----------------------------LOGISTIC REGRESSION--------------------------------
+
+clean_data$Group <- as.factor(clean_data$Group)
+
+#_________________________SPLIT INTO TRAIN/TEST DATA____________________________
+# set random state for splitting data
+set.seed(345)
+
+# split data into training and test set
+data_split <- initial_split(data = clean_data,
+                            prop = 0.8,
+                            strata = Group)
+
+# create the train and tests data set
+train_data <- data_split %>% training()
+
+test_data <- data_split %>% testing()
+
+#____________________________HYPER PARAMTER TUNING______________________________
+
+# hyper-parameter tuning for `mixture` and `penalty`
+
+# define the logistic regression model
+logis_model <- logistic_reg(mixture = tune(), 
+                            penalty = tune(),
+                            engine = "glmnet")
+
+# define a grid search for hyper-parameters
+
+grid_Search <- grid_regular(mixture(),
+                            penalty(),
+                            levels = c(mixture = 4, penalty = 4))
+
+# define the workflow for parameter tuning and building model
+
+log_reg_workflow <- workflow() %>%
+  add_model(logis_model) %>% # add the above created model
+  add_formula(Group ~ .) # set the formula: response variable ~ predictors
+
+# define cross validation method for grid search
+
+cv_folds <- vfold_cv(train_data,
+                     v = 7)
+
+# tune the parameters using the above defined methods
+
+tune_logis_reg <- tune_grid(
+  object = log_reg_workflow,
+  resamples = cv_folds,
+  grid = grid_Search,
+  control = control_grid(save_pred = TRUE)
+)
+
+# choose the best values for the logistic regression model parameters
+chosen_params <- select_best(tune_logis_reg, metric = "accuracy")
+
+#_____________________________LOGISTIC REGRESSION MODEL_________________________
+
+# fit the model with the chosen parameter values
+final_model <- logistic_reg(
+  mixture = chosen_params$mixture,
+  penalty = chosen_params$mixture) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification") %>%
+  fit(Group ~ ., data = train_data)
 
 
+# Predict the results on test data
+pred_results <- predict(final_model,
+                        new_data = test_data,
+                        type = "class")
 
+# combine the actual and predicted class variables in one data frame
+predicted_class <- test_data %>%
+  select(Group) %>%
+  bind_cols(pred_results)
 
+# print the confusion matrix
+conf_mat(predicted_class,
+         truth = Group,
+         estimate = .pred_class)
 
+# get the significance of all the predictors used in descending order
+predictors_significance <- tidy(final_model) %>%
+  arrange(desc(abs(estimate)))
 
-
-
-
-
-
-
+# visualize the predictors significance in classification results
+predictors_significance %>%
+  ggplot(aes(x = term, y = estimate)) +
+  geom_col(fill = "rosybrown1", color = "lightcoral") +
+  geom_text(aes(label = round(estimate, 3)), 
+            parse = TRUE, 
+            colour = "black",
+            size = 2.75,
+            vjust = 0, hjust = 1) +
+  labs(title = "Siginificance of predictor variables",
+       x = "Predictor variables",
+       y = "Siginificance level") +
+  theme_classic() +
+  coord_flip()
