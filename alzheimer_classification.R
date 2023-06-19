@@ -11,6 +11,8 @@ library(fclust)
 library(tidymodels)
 library(glmnet)
 library(caret)
+library(factoextra)
+library(cluster)
 
 
 # read the csv file as data frame
@@ -220,9 +222,10 @@ cat("Optimal value of k: ", optimal_k)
 # Perform fuzzy k-means clustering
 
 clustering_FKM <-  function(data, k_clusters){
-  fkm_output <- FKM(data.matrix(data),
-                    k =k_clusters,
-                    stand = 1
+  fkm_output <- fanny(data.matrix(data),
+                      k =k_clusters,
+                      stand = T,
+                      memb.exp = 1.15
                     )
   
   return(fkm_output)
@@ -231,12 +234,24 @@ clustering_FKM <-  function(data, k_clusters){
 fuzzy_k_means_result <- clustering_FKM(clean_data, optimal_k)
 
 # print the summary of the clustering algorithm
-summary.fclust(fuzzy_k_means_result)
+summary(fuzzy_k_means_result)
 
 # plot the clusters
-plot(fuzzy_k_means_result,
-     colclus = c("dodgerblue3", "palevioletred3"),
-     pca = TRUE)
+fviz_cluster(
+    object = fuzzy_k_means_result,
+    geom = "point",
+    ellipse.type = "norm",
+    show.clust.cent = T,
+    repel = T,
+    palette = c("lightseagreen", "cornflowerblue"),
+    main = "Clusters - Group (Demented vs Non-Demented)",
+    ggtheme = theme(
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(colour = "black")
+    )
+  )
 
 #----------------------------LOGISTIC REGRESSION--------------------------------
 
@@ -261,7 +276,7 @@ test_data <- data_split %>% testing()
 # hyper-parameter tuning for `mixture` and `penalty`
 
 # define the logistic regression model
-logis_model <- logistic_reg(mixture = tune(), 
+logis_model <- logistic_reg(mixture = tune(),
                             penalty = tune(),
                             engine = "glmnet")
 
@@ -310,9 +325,10 @@ pred_results <- predict(final_model,
                         new_data = test_data,
                         type = "class")
 
+
 # combine the actual and predicted class variables in one data frame
 predicted_class <- test_data %>%
-  select(Group) %>%
+  select("Group") %>%
   bind_cols(pred_results)
 
 # print the confusion matrix
@@ -344,7 +360,7 @@ predictors_significance %>%
 # correlation matrix
 
 corrplot(
-  cor(cor(data.matrix(clean_data[, -c(1, 2, 4)]))),
+  cor(cor(data.matrix(clean_data[, -c(1, 2, 7)]))),
   type="upper",
   order = "hclust",
   col = brewer.pal(n=6, "PuOr"),
@@ -355,19 +371,61 @@ corrplot(
 )
 
 # find the redundant variables and remove them from the data
-findCorrelation(cor(data.matrix(clean_data[, -c(1, 2, 4)])), cutoff = 0.75)
+findCorrelation(cor(data.matrix(clean_data[, -c(1, 2, 7)])), cutoff = 0.75)
 
-# Remove `eTIV` from the data
-clean_data <- clean_data[,-8]
+# Remove `eTIV` and `CDR` from the data
+temp_data <- clean_data[,-c(7,8)]
+
+temp_data$Group <- as.numeric(temp_data$Group)
 
 # calculate the importance value for each feature
-fs <- filterVarImp(x = clean_data[, c(2:9)],
-                            y = clean_data$Group)
+fs <- filterVarImp(x = temp_data[, 2:8],
+                   y = temp_data[, 1])
 
 # bind the features and corresponding score in a data frame
 fs <-  data.frame(cbind(feature = rownames(fs), score = as.double(fs[,1])))
 
 fs[order(fs$score, decreasing = T),]
 
-# selecting the top 3 features as new predictors
-new_data <- clean_data[, c("Group", "MMSE", "nWBV", "CDR")]
+# selecting the top 4 features as new predictors
+new_data <- temp_data[, c("Group", "MMSE", "Age", "Gender", "EDUC")]
+
+new_data$Group <- as.factor(new_data$Group)
+
+#----------------LOGISTIC REGRESSION WITH SELECTED FEATURES---------------------
+
+# set random state for splitting data
+set.seed(45)
+
+# split data into training and test set
+new_split <- initial_split(data = new_data,
+                            prop = 0.8,
+                            strata = Group)
+
+# create the train and tests data set
+new_train_data <- new_split %>% training()
+
+new_test_data <- new_split %>% testing()
+
+log_model2 <- logistic_reg(
+  mixture = chosen_params$mixture,
+  penalty = chosen_params$penalty) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification") %>%
+  fit(Group ~ ., data = new_train_data)
+
+
+# Predict the results on test data
+pred_results2 <- predict(log_model2,
+                        new_data = new_test_data,
+                        type = "class")
+
+# combine the actual and predicted class variables in one data frame
+predicted_class2 <- new_test_data %>%
+  select(Group) %>%
+  bind_cols(pred_results2)
+
+# print the confusion matrix
+conf_mat(predicted_class2,
+         truth = Group,
+         estimate = .pred_class)
